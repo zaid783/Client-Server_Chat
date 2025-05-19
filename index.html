@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #chat-box {
+            width: 80%;
+            max-width: 600px;
+            height: 70%;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background: #fff;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #message-input {
+            width: 80%;
+            max-width: 600px;
+            display: flex;
+        }
+        #message-input input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px 0 0 5px;
+        }
+        #message-input button {
+            padding: 10px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 0 5px 5px 0;
+            cursor: pointer;
+        }
+        #message-input button:hover {
+            background-color: #218838;
+        }
+
+        #username-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .username-form {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .error-message {
+            color: red;
+            margin-top: 10px;
+            font-size: 14px;
+            padding: 10px;
+            background-color: #ffebee;
+            border-radius: 4px;
+        }
+
+        #connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 4px;
+            background-color: #f44336;
+            color: white;
+            font-size: 12px;
+        }
+
+        #connection-status.connected {
+            background-color: #4caf50;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #chat-box div {
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            word-wrap: break-word;
+        }
+
+        #chat-box .system-message {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+
+        #chat-box .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+
+        #chat-box div:not(.system-message):not(.error-message) {
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <div id="connection-status">Connecting...</div>
+    <div id="username-container">
+        <div class="username-form">
+            <h2>Enter Username</h2>
+            <input type="text" id="username-input" placeholder="Enter your username">
+            <button id="join-chat">Join Chat</button>
+            <div id="username-error" class="error-message hidden"></div>
+        </div>
+    </div>
+    <div id="chat-box"></div>
+    <div id="message-input">
+        <input type="text" id="message" placeholder="Type your message here...">
+        <button id="send-button">Send</button>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const messageInput = document.getElementById('message');
+        const sendButton = document.getElementById('send-button');
+        const usernameContainer = document.getElementById('username-container');
+        const usernameInput = document.getElementById('username-input');
+        const joinChatButton = document.getElementById('join-chat');
+        const usernameError = document.getElementById('username-error');
+        const connectionStatus = document.getElementById('connection-status');
+
+        let username = '';
+        const socket = new WebSocket('ws://localhost:8080');
+
+        // Add connection error handling
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            appendMessage('Error: Could not connect to the chat server', 'error-message');
+            usernameError.textContent = 'Could not connect to the chat server';
+            usernameError.classList.remove('hidden');
+        };
+
+        socket.onopen = () => {
+            console.log('Connected to chat server');
+            connectionStatus.textContent = 'Connected';
+            connectionStatus.classList.add('connected');
+            usernameContainer.style.display = 'flex';
+        };
+
+        socket.onclose = () => {
+            console.log('Disconnected from chat server');
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.classList.remove('connected');
+            usernameContainer.style.display = 'none';
+            appendMessage('Disconnected from chat server', 'error-message');
+        };
+
+        // Initially hide both chat interface and username container
+        usernameContainer.style.display = 'none';
+        chatBox.style.display = 'none';
+        messageInput.style.display = 'none';
+
+        joinChatButton.addEventListener('click', () => {
+            const proposedUsername = usernameInput.value.trim();
+            if (proposedUsername) {
+                socket.send(JSON.stringify({
+                    type: 'login',
+                    username: proposedUsername
+                }));
+            }
+        });
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            switch (data.type) {
+                case 'login_error':
+                    usernameError.textContent = data.message;
+                    usernameError.classList.remove('hidden');
+                    break;
+                
+                case 'login_success':
+                    username = data.username;
+                    usernameContainer.classList.add('hidden');
+                    chatBox.style.display = 'flex';
+                    messageInput.style.display = 'flex';
+                    break;
+                
+                case 'message':
+                    appendMessage(`${data.username}: ${data.message}`);
+                    break;
+                
+                case 'system':
+                    appendMessage(`System: ${data.message}`, 'system-message');
+                    break;
+            }
+        };
+
+        function appendMessage(text, className = '') {
+            const message = document.createElement('div');
+            message.textContent = text;
+            if (className) message.className = className;
+            chatBox.appendChild(message);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        sendButton.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            if (message) {
+                socket.send(JSON.stringify({
+                    type: 'message',
+                    message: message
+                }));
+                messageInput.value = '';
+                appendMessage(`You: ${message}`);
+            }
+        });
+
+        // Handle Enter key press
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendButton.click();
+            }
+        });
+    </script>
+</body>
+</html>
